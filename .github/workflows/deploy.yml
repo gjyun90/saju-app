@@ -21,8 +21,8 @@ jobs:
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1" # 웹 배포에는 Electron 실행 파일이 필요 없음
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -30,8 +30,7 @@ jobs:
       - run: npm test
       - run: npm run typecheck
       - run: npm run build:web
-      - run: touch dist/.nojekyll
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
@@ -43,4 +42,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
