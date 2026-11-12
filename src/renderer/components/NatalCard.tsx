@@ -13,8 +13,8 @@ export function NatalCard({ view, reading }: { view: NatalView | null; reading: 
         <>
           <div className="natal-grid">
             {view.columns.map((c) => (
-              <div key={c.label} className={`natal-col${c.isDay ? " day" : ""}`}>
-                <div className="head">{c.label}{c.isDay && <span className="me">나</span>}</div>
+              <div key={c.label} className={`natal-col${c.isDay ? " day" : ""}${c.unknown ? " unknown" : ""}`}>
+                <div className="head">{c.label}{c.isDay && <span className="me">나</span>}{c.unknown && <span className="muted" style={{ fontWeight: 500 }}>(모름)</span>}</div>
                 <CharTile cell={c.stem} pos="top" reading={reading} />
                 <CharTile cell={c.branch} pos="bottom" reading={reading} />
                 <div className="tg"><span>{c.stemLabel}</span><span>{c.branchLabel}</span></div>

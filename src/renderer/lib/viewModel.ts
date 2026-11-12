@@ -1,8 +1,8 @@
 // 엔진 결과 → 화면 데이터 변환 (React와 무관한 순수 함수, 단위 테스트 대상)
 import {
   BRANCHES, STEMS, TEN_GOD_GROUP_HANGUL, TEN_GOD_HANGUL, TWELVE_STAGE_HANGUL, TenGodGroup,
-  computeChart, computeLuck, daeunAt, ganzhiStem, ipchun, seunFor, wolunFor,
-  type BirthInput, type LuckCycle, type LuckTimeline, type NatalChart, type Pillar, type PeriodPillar,
+  computeChart, computeLuck, ganzhiStem, ipchun, seunFor, wolunFor,
+  type BirthInput, type LuckTimeline, type NatalChart, type Pillar, type PeriodPillar,
 } from "../../engine";
 import type { HistoryInput } from "./history";
 
@@ -88,7 +88,7 @@ export function analyze(name: string, birth: BirthInput): Analysis {
 export interface CharCell {
   hanja: string;
   hangul: string;
-  element: number; // 0 木 1 火 2 土 3 金 4 水
+  element: number; // 0 木 1 火 2 土 3 金 4 水, -1 모름
 }
 
 export interface PillarView {
@@ -110,17 +110,22 @@ export function pillarView(p: Pillar): PillarView {
 
 const POS_LABEL = { HOUR: "시주", DAY: "일주", MONTH: "월주", YEAR: "연주" } as const;
 
+/** 오행 없음(-1): 시간을 모를 때의 빈 칸 */
+const UNKNOWN_CELL: CharCell = { hanja: "?", hangul: "", element: -1 };
+const UNKNOWN_PILLAR: PillarView = { stem: UNKNOWN_CELL, branch: UNKNOWN_CELL, stemLabel: "-", branchLabel: "-" };
+
 export interface NatalView {
-  columns: (PillarView & { label: string; isDay: boolean })[]; // 시·일·월·연 순서 (시 모름이면 3개)
+  columns: (PillarView & { label: string; isDay: boolean; unknown: boolean })[]; // 시·일·월·연 순서 (시 모름이면 시주는 unknown)
   dayMaster: { hanja: string; hangul: string; element: number; yinYang: string; stage: string };
 }
 
 export function natalView(chart: NatalChart): NatalView {
   const order = ["HOUR", "DAY", "MONTH", "YEAR"] as const;
-  const columns = order
-    .map((pos) => chart.pillars.find((p) => p.ref.position === pos))
-    .filter((p): p is Pillar => !!p)
-    .map((p) => ({ ...pillarView(p), label: POS_LABEL[p.ref.position!], isDay: p.ref.position === "DAY" }));
+  const columns = order.map((pos) => {
+    const p = chart.pillars.find((x) => x.ref.position === pos);
+    if (!p) return { ...UNKNOWN_PILLAR, label: POS_LABEL[pos], isDay: false, unknown: true }; // 시간 모름 → 빈 시주
+    return { ...pillarView(p), label: POS_LABEL[pos], isDay: pos === "DAY", unknown: false };
+  });
   const dm = STEMS[chart.dayMaster];
   const dayPillar = chart.pillars.find((p) => p.ref.position === "DAY")!;
   return {
@@ -180,25 +185,39 @@ export interface LuckItem {
 const tgShort = (v: PillarView) => `${v.stemLabel}·${v.branchLabel}`;
 export const luckTenGodText = tgShort;
 
-export function daeunItems(a: Analysis, now: number): LuckItem[] {
-  const cur = daeunAt(a.luck, now);
-  return a.luck.daeun.map((c, i) => {
-    const s = kstParts(c.startUtcMs);
-    return {
-      key: i,
-      top: `${c.startAge}–${c.startAge + 9}세`,
-      sub: `${s.y}.${s.m}~`,
-      current: cur?.order === c.order,
-      pillar: pillarView(c.pillar),
-    };
-  });
+// ---------------- 나이 기준 ----------------
+// KOREAN(전통나이·세는 나이): 태어난 해 = 1세. 대운수 N이면 N세가 되는 해에 대운이 바뀜
+// INTERNATIONAL(만 나이): 태어난 해 = 0세. 대운수 N이면 만 N세가 되는 해에 대운이 바뀜
+// 연도는 모두 입춘 기준 사주 연도. 대운·세운·나이 표시가 항상 같은 기준을 쓰도록 이 함수들만 사용한다.
+export type AgeMode = "KOREAN" | "INTERNATIONAL";
+
+const ageOffset = (mode: AgeMode) => (mode === "KOREAN" ? 1 : 0);
+
+/** 태어난 사주 연도 (연주의 해, 입춘 기준) */
+export function birthSajuYear(a: Analysis): number {
+  return sajuYearAt(a.chart.birth.utcMs);
 }
 
-/** 해당 대운 기간에 입춘이 속하는 10개 사주 연도 */
-export function seunYearsOf(cycle: LuckCycle): number[] {
-  let y = kstParts(cycle.startUtcMs).y;
-  if (ipchun(y).utcMs < cycle.startUtcMs) y += 1;
-  return Array.from({ length: 10 }, (_, i) => y + i);
+export function ageInYear(a: Analysis, year: number, mode: AgeMode): number {
+  return year - birthSajuYear(a) + ageOffset(mode);
+}
+
+/** i번째 대운(0부터)이 시작되는 사주 연도 */
+export function daeunStartYear(a: Analysis, i: number, mode: AgeMode): number {
+  return birthSajuYear(a) + a.luck.daeun[i].startAge - ageOffset(mode);
+}
+
+/** i번째 대운의 10개 세운 연도 = 대운 나이 범위(startAge ~ startAge+9)에 해당하는 연도 */
+export function seunYearsOf(a: Analysis, i: number, mode: AgeMode): number[] {
+  const y0 = daeunStartYear(a, i, mode);
+  return Array.from({ length: 10 }, (_, k) => y0 + k);
+}
+
+/** 사주 연도 year가 속한 대운 인덱스 (첫 대운 이전이면 -1) */
+export function daeunIndexOfYear(a: Analysis, year: number, mode: AgeMode): number {
+  const n = a.luck.daeun.length;
+  for (let i = n - 1; i >= 0; i--) if (year >= daeunStartYear(a, i, mode)) return year < daeunStartYear(a, i, mode) + 10 ? i : -1;
+  return -1;
 }
 
 /** 시각 now가 속한 사주 연도 (입춘 기준) */
@@ -207,15 +226,26 @@ export function sajuYearAt(now: number): number {
   return now >= ipchun(y).utcMs ? y : y - 1;
 }
 
-export function seunItems(a: Analysis, cycle: LuckCycle, now: number): LuckItem[] {
+export function daeunItems(a: Analysis, now: number, mode: AgeMode): LuckItem[] {
+  const cur = daeunIndexOfYear(a, sajuYearAt(now), mode);
+  return a.luck.daeun.map((c, i) => ({
+    key: i,
+    top: `${c.startAge}–${c.startAge + 9}세`,
+    sub: `${daeunStartYear(a, i, mode)}~`,
+    current: i === cur,
+    pillar: pillarView(c.pillar),
+  }));
+}
+
+export function seunItems(a: Analysis, daeunIndex: number, now: number, mode: AgeMode): LuckItem[] {
   const curYear = sajuYearAt(now);
-  const birthYear = a.chart.birth.solarDate.y;
-  return seunYearsOf(cycle).map((y) => {
+  return seunYearsOf(a, daeunIndex, mode).map((y) => {
     const s: PeriodPillar = seunFor(a.chart, y);
+    const age = `${ageInYear(a, y, mode)}세`;
     return {
       key: y,
       top: `${y}년`,
-      sub: y === curYear ? "올해" : `${y - birthYear + 1}세`,
+      sub: y === curYear ? `올해 · ${age}` : age,
       current: y === curYear,
       pillar: pillarView(s.pillar),
     };
@@ -238,16 +268,19 @@ export function wolunItems(a: Analysis, year: number, now: number): LuckItem[] {
   });
 }
 
-/** 화면 첫 선택값: 현재 대운 / 올해 / 이번 달 (해당 없으면 첫 항목) */
-export function initialSelection(a: Analysis, now: number): { daeun: number; year: number; month: number } {
-  const cur = daeunAt(a.luck, now);
-  const daeun = cur ? cur.order - 1 : 0;
-  const years = seunYearsOf(a.luck.daeun[daeun]);
+/** 대운 i를 골랐을 때의 세운·월운 기본 선택 (올해가 포함되면 올해, 아니면 첫 해) */
+export function selectionForDaeun(a: Analysis, daeun: number, now: number, mode: AgeMode): { daeun: number; year: number; month: number } {
+  const years = seunYearsOf(a, daeun, mode);
   const thisYear = sajuYearAt(now);
   const year = years.includes(thisYear) ? thisYear : years[0];
-  const months = wolunItems(a, year, now);
-  const mi = months.findIndex((m) => m.current);
+  const mi = wolunItems(a, year, now).findIndex((m) => m.current);
   return { daeun, year, month: mi >= 0 ? mi : 0 };
+}
+
+/** 화면 첫 선택값: 현재 대운 / 올해 / 이번 달 (해당 없으면 첫 항목) */
+export function initialSelection(a: Analysis, now: number, mode: AgeMode): { daeun: number; year: number; month: number } {
+  const cur = daeunIndexOfYear(a, sajuYearAt(now), mode);
+  return selectionForDaeun(a, cur >= 0 ? cur : 0, now, mode);
 }
 
 export function ganzhiText(p: PillarView): string {

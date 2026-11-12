@@ -1,16 +1,19 @@
 import { useRef } from "react";
+import type { AgeMode } from "../lib/viewModel";
 import { Modal } from "./Modal";
 
 interface Props {
   reading: boolean;
   onReadingChange(v: boolean): void;
+  ageMode: AgeMode;
+  onAgeModeChange(v: AgeMode): void;
   historyCount: number;
   onExport(): void;
   onImport(file: File): void;
   onClose(): void;
 }
 
-export function SettingsDialog({ reading, onReadingChange, historyCount, onExport, onImport, onClose }: Props) {
+export function SettingsDialog({ reading, onReadingChange, ageMode, onAgeModeChange, historyCount, onExport, onImport, onClose }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <Modal title="설정" onClose={onClose}>
@@ -20,6 +23,13 @@ export function SettingsDialog({ reading, onReadingChange, historyCount, onExpor
           <span className="set-text"><b>한글 독음 표시</b><small>한자 아래에 갑·을·자·축 같은 읽는 법을 표시</small></span>
           <input type="checkbox" role="switch" className="switch" checked={reading} onChange={(e) => onReadingChange(e.target.checked)} />
         </label>
+        <div className="set-row">
+          <span className="set-text" id="lbl-age"><b>나이 기준</b><small>대운·세운의 나이와 연도를 맞추는 기준 (전통나이: 태어난 해가 1세)</small></span>
+          <div className="seg" role="group" aria-labelledby="lbl-age">
+            <button type="button" style={{ padding: "0 12px" }} aria-pressed={ageMode === "KOREAN"} onClick={() => onAgeModeChange("KOREAN")}>전통나이</button>
+            <button type="button" style={{ padding: "0 12px" }} aria-pressed={ageMode === "INTERNATIONAL"} onClick={() => onAgeModeChange("INTERNATIONAL")}>만 나이</button>
+          </div>
+        </div>
       </div>
 
       <div className="set-group">

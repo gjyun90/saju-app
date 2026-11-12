@@ -12,8 +12,8 @@ import { HistoryStore, makeBackup, parseBackup, type HistoryEntry } from "./lib/
 import { isDesktop, saveScreenshotDesktop } from "./lib/platform";
 import { shareOrDownload } from "./lib/share";
 import {
-  EMPTY_FORM, analyze, daeunItems, formFromHistory, initialSelection, natalView, seunItems,
-  tenGodGroups, validateForm, wolunItems, type Analysis, type FormState,
+  EMPTY_FORM, analyze, daeunItems, formFromHistory, initialSelection, natalView, selectionForDaeun, seunItems,
+  tenGodGroups, validateForm, wolunItems, type AgeMode, type Analysis, type FormState,
 } from "./lib/viewModel";
 import { STEMS, ganzhiHanja } from "../engine";
 
@@ -25,6 +25,9 @@ type Toast = { text: string; kind: "info" | "error" } | null;
 const READING_KEY = "saju.reading";
 const loadReading = () => { try { return localStorage.getItem(READING_KEY) !== "0"; } catch { return true; } };
 const saveReading = (v: boolean) => { try { localStorage.setItem(READING_KEY, v ? "1" : "0"); } catch { /* 무시 */ } };
+const AGE_KEY = "saju.ageMode";
+const loadAgeMode = (): AgeMode => { try { return localStorage.getItem(AGE_KEY) === "INTERNATIONAL" ? "INTERNATIONAL" : "KOREAN"; } catch { return "KOREAN"; } };
+const saveAgeMode = (v: AgeMode) => { try { localStorage.setItem(AGE_KEY, v); } catch { /* 무시 */ } };
 
 const dateStamp = () => {
   const d = new Date();
@@ -38,6 +41,9 @@ export function App() {
   const [sel, setSel] = useState<{ daeun: number; year: number; month: number } | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [reading, setReading] = useState(loadReading);
+  const [ageMode, setAgeMode] = useState<AgeMode>(loadAgeMode);
+  const ageModeRef = useRef(ageMode);
+  ageModeRef.current = ageMode;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [preview, setPreview] = useState<{ blob: Blob; filename: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,7 +70,7 @@ export function App() {
       return false;
     }
     setAnalysis(a);
-    setSel(initialSelection(a, Date.now()));
+    setSel(initialSelection(a, Date.now(), ageModeRef.current));
     if (save) {
       store.save(v.history).then(refreshHistory)
         .catch(() => showToast("조회 이력을 저장하지 못했습니다", "error"));
@@ -149,22 +155,22 @@ export function App() {
   };
 
   const onReadingChange = (v: boolean) => { setReading(v); saveReading(v); };
+  const onAgeModeChange = (v: AgeMode) => {
+    setAgeMode(v);
+    saveAgeMode(v);
+    if (analysis) setSel(initialSelection(analysis, Date.now(), v)); // 기준이 바뀌면 현재 대운·올해로 다시 선택
+  };
 
   // ---- 화면 데이터 ----
   const natal = useMemo(() => (analysis ? natalView(analysis.chart) : null), [analysis]);
   const groups = useMemo(() => (analysis ? tenGodGroups(analysis.chart) : null), [analysis]);
-  const daeun = useMemo(() => (analysis ? daeunItems(analysis, now) : null), [analysis, now]);
+  const daeun = useMemo(() => (analysis ? daeunItems(analysis, now, ageMode) : null), [analysis, now, ageMode]);
   const cycle = analysis && sel ? analysis.luck.daeun[sel.daeun] : null;
-  const seun = useMemo(() => (analysis && cycle ? seunItems(analysis, cycle, now) : null), [analysis, cycle, now]);
+  const seun = useMemo(() => (analysis && sel ? seunItems(analysis, sel.daeun, now, ageMode) : null), [analysis, sel?.daeun, now, ageMode]);
   const wolun = useMemo(() => (analysis && sel ? wolunItems(analysis, sel.year, now) : null), [analysis, sel?.year, now]);
 
   const selectDaeun = (i: number) => {
-    if (!analysis) return;
-    const c = analysis.luck.daeun[i];
-    const items = seunItems(analysis, c, now);
-    const year = (items.find((s) => s.current) ?? items[0]).key;
-    const months = wolunItems(analysis, year, now);
-    setSel({ daeun: i, year, month: Math.max(0, months.findIndex((m) => m.current)) });
+    if (analysis) setSel(selectionForDaeun(analysis, i, now, ageMode));
   };
   const selectYear = (year: number) => {
     if (!analysis || !sel) return;
@@ -200,7 +206,7 @@ export function App() {
           <div className="col-right">
             <LuckStrip
               title="대운"
-              sub={analysis ? `10년 단위 · ${analysis.luck.direction === "FORWARD" ? "순행" : "역행"} · 대운수 ${analysis.luck.daeunNumber}` : ""}
+              sub={analysis ? `10년 단위 · ${analysis.luck.direction === "FORWARD" ? "순행" : "역행"} · 대운수 ${analysis.luck.daeunNumber} · ${ageMode === "KOREAN" ? "전통나이" : "만 나이"}` : ""}
               items={daeun} selectedKey={sel?.daeun ?? null} onSelect={selectDaeun} reading={reading}
             />
             <LuckStrip
@@ -223,6 +229,7 @@ export function App() {
       {settingsOpen && (
         <SettingsDialog
           reading={reading} onReadingChange={onReadingChange}
+          ageMode={ageMode} onAgeModeChange={onAgeModeChange}
           historyCount={history.length} onExport={onExport} onImport={onImport}
           onClose={() => setSettingsOpen(false)}
         />
